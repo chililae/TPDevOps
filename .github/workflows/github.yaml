@@ -1,0 +1,65 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Configurer Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+          
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 bandit
+          pip install -r ./requirements.txt
+          
+      - name: Peluches avec flocons8
+        run: |
+          flake8 src/app.py --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 src/app.py --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          
+      - name: Contrôle de sécurité avec bandit
+        run: |
+          bandit -r src/ --severity-level high
+      
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Connectez-vous à DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          
+      - name: Construire et pousser
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/flask-my-ip-app:latest
+
+      - name: Éclaireur Docker
+        uses: docker/scout-action@v1
+        with:
+          dockerhub-user: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          command: cves
+          image: ${{ secrets.DOCKERHUB_USERNAME }}/flask-my-ip-app:latest
+          only-severities: critical,high
+          sarif-file: scout-results.sarif
+          github-token: ${{ secrets.GITHUB_TOKEN }}
